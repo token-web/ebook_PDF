@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+@media print {
+  body {
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  header, button, nav, .no-print {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  #book-page-container {
+    box-shadow: none !important;
+    border: none !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    page-break-after: always;
+    page-break-inside: avoid;
+  }
+}

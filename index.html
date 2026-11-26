@@ -1,0 +1,842 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>포토북 스튜디오 - 나만의 사진 앨범 & PDF 저장</title>
+    <meta name="description" content="사진을 업로드하여 나만의 멋진 포토북을 만들고 PDF로 저장하는 앱" />
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;700&family=Noto+Serif+KR:wght@400;700&display=swap" rel="stylesheet">
+    
+    <!-- React & ReactDOM & Babel UMD -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- PDF Export Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <style>
+      body {
+        margin: 0;
+        font-family: 'Noto Sans KR', sans-serif;
+      }
+    </style>
+  </head>
+  <body class="bg-[#fcfbf9] text-stone-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useRef } = React;
+
+      const SAMPLE_PHOTOS = [
+        {
+          id: 'sample-1',
+          url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&q=80',
+          title: '푸른 바다와 햇살',
+          description: '끝없이 펼쳐진 에메랄드빛 바다와 따스한 모래사장에서 보낸 잊지 못할 오후의 휴식.',
+          date: '2026-07-15',
+          location: '하와이 마우이 해변',
+          layout: 'classic'
+        },
+        {
+          id: 'sample-2',
+          url: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=1200&q=80',
+          title: '안개 낀 산맥 트레킹',
+          description: '새벽 안개를 뚫고 올라선 정상에서 마주한 대자연의 경이로운 순간과 고요함.',
+          date: '2026-08-20',
+          location: '스위스 알프스',
+          layout: 'polaroid'
+        },
+        {
+          id: 'sample-3',
+          url: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1200&q=80',
+          title: '별이 빛나는 밤하늘',
+          description: '도시의 불빛을 벗어나 마주한 은하수. 밤하늘을 수놓은 수많은 별들이 마음을 설레게 했다.',
+          date: '2026-09-10',
+          location: '몽골 초원',
+          layout: 'minimal'
+        },
+        {
+          id: 'sample-4',
+          url: 'https://images.unsplash.com/photo-1513151233558-d860c5398176?auto=format&fit=crop&w=1200&q=80',
+          title: '유럽 골목길의 카페',
+          description: '오래된 돌담길 옆 작은 테라스에서 마신 따뜻한 에스프레소와 여유로운 오후 시간.',
+          date: '2026-10-05',
+          location: '이탈리아 피렌체',
+          layout: 'classic'
+        }
+      ];
+
+      function App() {
+        const [photos, setPhotos] = useState(() => {
+          try {
+            const saved = localStorage.getItem('photobook_photos');
+            if (saved) return JSON.parse(saved);
+          } catch(e) {}
+          return SAMPLE_PHOTOS;
+        });
+
+        const [albumConfig, setAlbumConfig] = useState(() => {
+          try {
+            const saved = localStorage.getItem('photobook_config');
+            if (saved) return JSON.parse(saved);
+          } catch(e) {}
+          return {
+            title: '나의 소중한 순간들',
+            subtitle: 'Memorable Journey & Stories',
+            author: '포토그래퍼',
+            date: new Date().toISOString().split('T')[0],
+            closingMessage: '소중한 순간들과 함께해주셔서 감사합니다. 이 앨범이 당신의 기억 속에 아름답게 남기를 바랍니다.',
+            theme: 'classic',
+            font: 'gothic',
+            spreadMode: false
+          };
+        });
+
+        const [currentPage, setCurrentPage] = useState(0);
+        const [activeTab, setActiveTab] = useState('view');
+        const [isExporting, setIsExporting] = useState(false);
+        const [exportProgress, setExportProgress] = useState('');
+
+        useEffect(() => {
+          try {
+            localStorage.setItem('photobook_photos', JSON.stringify(photos));
+          } catch(e) {}
+        }, [photos]);
+
+        useEffect(() => {
+          try {
+            localStorage.setItem('photobook_config', JSON.stringify(albumConfig));
+          } catch(e) {}
+        }, [albumConfig]);
+
+        const totalPages = photos.length + 2;
+
+        const handleFileUpload = (e) => {
+          const files = e.target.files;
+          if (!files || files.length === 0) return;
+
+          Array.from(files).forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const MAX_WIDTH = 1200;
+                const MAX_HEIGHT = 1200;
+                let width = img.width;
+                let height = img.height;
+                if (width > height) {
+                  if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                } else {
+                  if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                const compressedUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+                const newPhoto = {
+                  id: 'photo-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+                  url: compressedUrl,
+                  title: file.name.replace(/\.[^/.]+$/, ''),
+                  description: '이 사진에 대한 설명을 입력하세요.',
+                  date: new Date().toISOString().split('T')[0],
+                  location: '장소 입력',
+                  layout: 'classic'
+                };
+                setPhotos(prev => [...prev, newPhoto]);
+              };
+              img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+          });
+          e.target.value = '';
+        };
+
+        const addSamplePhotos = () => {
+          setPhotos(SAMPLE_PHOTOS);
+          setCurrentPage(0);
+        };
+
+        const clearAllPhotos = () => {
+          if (confirm('모든 사진을 삭제하시겠습니까?')) {
+            setPhotos([]);
+            setCurrentPage(0);
+          }
+        };
+
+        const removePhoto = (id, e) => {
+          e?.stopPropagation();
+          setPhotos(prev => prev.filter(p => p.id !== id));
+        };
+
+        const movePhoto = (index, direction, e) => {
+          e?.stopPropagation();
+          const targetIndex = direction === 'up' ? index - 1 : index + 1;
+          if (targetIndex < 0 || targetIndex >= photos.length) return;
+          const updated = [...photos];
+          const temp = updated[index];
+          updated[index] = updated[targetIndex];
+          updated[targetIndex] = temp;
+          setPhotos(updated);
+        };
+
+        const updatePhotoDetail = (id, field, value) => {
+          setPhotos(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
+        };
+
+        const getFontFamilyCSS = () => {
+          switch (albumConfig.font) {
+            case 'myeongjo': return "'Noto Serif KR', serif";
+            case 'handwriting': return "'Nanum Pen Script', cursive";
+            case 'gothic':
+            default: return "'Noto Sans KR', sans-serif";
+          }
+        };
+
+        const getCanvasFontName = () => {
+          switch (albumConfig.font) {
+            case 'myeongjo': return 'serif';
+            case 'handwriting': return 'Nanum Pen Script';
+            case 'gothic':
+            default: return 'sans-serif';
+          }
+        };
+
+        const exportToPDF = async () => {
+          setIsExporting(true);
+          setExportProgress('PDF 변환 준비 중...');
+
+          try {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('landscape', 'mm', 'a4');
+            const canvasWidth = 1400;
+            const canvasHeight = 990;
+            const tHex = getThemeHexStyles();
+            const fontName = getCanvasFontName();
+
+            for (let i = 0; i < totalPages; i++) {
+              setExportProgress(`페이지 ${i + 1} / ${totalPages} 생성 중...`);
+              const canvas = document.createElement('canvas');
+              canvas.width = canvasWidth;
+              canvas.height = canvasHeight;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) continue;
+
+              ctx.fillStyle = tHex.pageBg;
+              ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+              if (i === 0) {
+                ctx.fillStyle = tHex.text;
+                ctx.textAlign = 'center';
+                ctx.strokeStyle = tHex.subText;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(60, 60, canvasWidth - 120, canvasHeight - 120);
+
+                ctx.font = `16px ${fontName}`;
+                ctx.fillStyle = tHex.subText;
+                ctx.fillText('PHOTOBOOK STUDIO', canvasWidth / 2, 160);
+
+                ctx.font = `bold 56px ${fontName}`;
+                ctx.fillStyle = tHex.text;
+                ctx.fillText(albumConfig.title, canvasWidth / 2, canvasHeight / 2 - 50, 1000);
+
+                ctx.font = `24px ${fontName}`;
+                ctx.fillStyle = tHex.subText;
+                ctx.fillText(albumConfig.subtitle, canvasWidth / 2, canvasHeight / 2 + 30, 1000);
+
+                ctx.font = `18px ${fontName}`;
+                ctx.fillStyle = tHex.text;
+                ctx.fillText(`지은이: ${albumConfig.author}`, canvasWidth / 2, canvasHeight - 180);
+
+                if (albumConfig.date) {
+                  ctx.font = `16px ${fontName}`;
+                  ctx.fillStyle = tHex.subText;
+                  ctx.fillText(albumConfig.date, canvasWidth / 2, canvasHeight - 140);
+                }
+              } else if (i > 0 && i <= photos.length) {
+                const photo = photos[i - 1];
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                await new Promise((resolve) => {
+                  img.onload = resolve;
+                  img.onerror = resolve;
+                  img.src = photo.url;
+                });
+
+                const boxX = 80;
+                const boxY = 80;
+                const boxW = 600;
+                const boxH = canvasHeight - 160;
+
+                if (img.width > 0 && img.height > 0) {
+                  const scale = Math.min(boxW / img.width, boxH / img.height);
+                  const w = img.width * scale;
+                  const h = img.height * scale;
+                  const x = boxX + (boxW - w) / 2;
+                  const y = boxY + (boxH - h) / 2;
+
+                  ctx.fillStyle = '#ffffff';
+                  ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+                  ctx.shadowBlur = 20;
+                  ctx.fillRect(x - 10, y - 10, w + 20, h + 20);
+                  ctx.shadowBlur = 0;
+                  ctx.drawImage(img, x, y, w, h);
+                }
+
+                const textX = 740;
+                let textY = 200;
+
+                ctx.textAlign = 'left';
+                ctx.font = `16px ${fontName}`;
+                ctx.fillStyle = tHex.subText;
+                const metaText = [photo.date, photo.location].filter(Boolean).join(' · ');
+                if (metaText) {
+                  ctx.fillText(metaText, textX, textY);
+                  textY += 40;
+                }
+
+                ctx.font = `bold 36px ${fontName}`;
+                ctx.fillStyle = tHex.text;
+                ctx.fillText(photo.title, textX, textY, 580);
+                textY += 60;
+
+                ctx.font = albumConfig.font === 'handwriting' ? `26px ${fontName}` : `20px ${fontName}`;
+                ctx.fillStyle = tHex.text;
+                const words = photo.description.split('');
+                let line = '';
+                const maxWidth = 560;
+                const lineHeight = 36;
+
+                for (let n = 0; n < words.length; n++) {
+                  const testLine = line + words[n];
+                  const metrics = ctx.measureText(testLine);
+                  if (metrics.width > maxWidth && n > 0) {
+                    ctx.fillText(line, textX, textY);
+                    line = words[n];
+                    textY += lineHeight;
+                  } else {
+                    line = testLine;
+                  }
+                }
+                ctx.fillText(line, textX, textY);
+
+                ctx.font = `14px ${fontName}`;
+                ctx.fillStyle = tHex.subText;
+                ctx.fillText(`Page ${i} of ${photos.length}`, textX, canvasHeight - 80);
+              } else {
+                ctx.fillStyle = tHex.text;
+                ctx.textAlign = 'center';
+
+                ctx.font = `bold 40px ${fontName}`;
+                ctx.fillText('The End', canvasWidth / 2, canvasHeight / 2 - 60);
+
+                ctx.font = albumConfig.font === 'handwriting' ? `26px ${fontName}` : `22px ${fontName}`;
+                ctx.fillStyle = tHex.subText;
+                ctx.fillText(albumConfig.closingMessage, canvasWidth / 2, canvasHeight / 2 + 10, 1000);
+
+                ctx.font = `16px ${fontName}`;
+                ctx.fillText(`${albumConfig.title} · ${albumConfig.author}`, canvasWidth / 2, canvasHeight - 120);
+              }
+
+              const imgData = canvas.toDataURL('image/jpeg', 0.92);
+              if (i > 0) pdf.addPage('a4', 'landscape');
+
+              const pdfWidth = pdf.internal.pageSize.getWidth();
+              const pdfHeight = pdf.internal.pageSize.getHeight();
+              pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+            }
+
+            setExportProgress('PDF 파일 다운로드 생성 중...');
+            pdf.save(`${albumConfig.title.replace(/\s+/g, '_')}_포토북.pdf`);
+          } catch (err) {
+            console.error(err);
+            alert('PDF 내보내기 중 오류가 발생했습니다.');
+          } finally {
+            setIsExporting(false);
+            setExportProgress('');
+          }
+        };
+
+        const getThemeHexStyles = () => {
+          switch (albumConfig.theme) {
+            case 'modern': return { bg: '#f8fafc', text: '#0f172a', pageBg: '#ffffff', pageBorder: '#e2e8f0', subText: '#64748b' };
+            case 'vintage': return { bg: '#f4efe6', text: '#3d3529', pageBg: '#fcf9f2', pageBorder: '#d9ceb8', subText: '#5c5040' };
+            case 'pastel': return { bg: '#fdf2f8', text: '#1e293b', pageBg: '#ffffff', pageBorder: '#fce7f3', subText: '#64748b' };
+            case 'dark': return { bg: '#020617', text: '#f8fafc', pageBg: '#0f172a', pageBorder: '#1e293b', subText: '#94a3b8' };
+            case 'classic':
+            default: return { bg: '#fcfbf9', text: '#292524', pageBg: '#ffffff', pageBorder: '#e7e5e4', subText: '#78716c' };
+          }
+        };
+
+        const tHex = getThemeHexStyles();
+        const currentFontFamily = getFontFamilyCSS();
+
+        return (
+          <div className="min-h-screen flex flex-col transition-colors duration-500 select-none" style={{ backgroundColor: tHex.bg, color: tHex.text, fontFamily: currentFontFamily }}>
+            {/* Header */}
+            <header className="border-b border-black/10 bg-white/90 backdrop-blur-md sticky top-0 z-30 px-6 py-4 flex items-center justify-between shadow-xs">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-stone-900 text-white shadow-sm">
+                  📚
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold tracking-tight text-slate-900">{albumConfig.title}</h1>
+                  <p className="text-xs text-slate-500">{photos.length}장의 추억 · {albumConfig.author}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setActiveTab('view')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    activeTab === 'view' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  앨범 보기
+                </button>
+                <button
+                  onClick={() => setActiveTab('edit')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    activeTab === 'edit' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  사진 편집 ({photos.length})
+                </button>
+                <button
+                  onClick={() => setActiveTab('settings')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    activeTab === 'settings' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  앨범 설정
+                </button>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <label className="cursor-pointer bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition-all flex items-center space-x-2">
+                  <span>사진 추가</span>
+                  <input type="file" multiple accept="image/*" onChange={handleFileUpload} className="hidden" />
+                </label>
+                <button
+                  onClick={exportToPDF}
+                  disabled={isExporting || photos.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition-all cursor-pointer"
+                >
+                  {isExporting ? '변환 중...' : 'PDF 저장'}
+                </button>
+              </div>
+            </header>
+
+            {/* Main */}
+            <main className="flex-1 flex flex-col items-center justify-center p-6 md:p-10 relative overflow-x-hidden">
+              {activeTab === 'view' && (
+                <div className="w-full max-w-6xl flex flex-col items-center">
+                  {photos.length === 0 ? (
+                    <div className="text-center py-20 bg-white/80 backdrop-blur-sm rounded-3xl border border-dashed border-slate-300 p-12 max-w-lg w-full shadow-sm text-slate-800">
+                      <h3 className="text-xl font-bold mb-2">등록된 사진이 없습니다</h3>
+                      <p className="text-sm text-slate-500 mb-6">사진을 업로드하거나 샘플 앨범을 불러와서 멋진 포토북을 만들어보세요.</p>
+                      <div className="flex justify-center space-x-3">
+                        <label className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-medium text-sm shadow-md transition-all cursor-pointer">
+                          <span>사진 업로드하기</span>
+                          <input type="file" multiple accept="image/*" onChange={handleFileUpload} className="hidden" />
+                        </label>
+                        <button
+                          onClick={addSamplePhotos}
+                          className="bg-slate-200 hover:bg-slate-300 text-slate-800 px-5 py-2.5 rounded-xl font-medium text-sm transition-all cursor-pointer"
+                        >
+                          샘플 앨범 보기
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-full flex justify-center items-center my-4">
+                        <div
+                          className="w-full max-w-5xl aspect-[1.414/1] rounded-2xl overflow-hidden p-8 md:p-12 relative flex transition-all duration-300 shadow-2xl"
+                          style={{
+                            backgroundColor: tHex.pageBg,
+                            color: tHex.text,
+                            border: `1px solid ${tHex.pageBorder}`,
+                            fontFamily: currentFontFamily
+                          }}
+                        >
+                          {currentPage === 0 && (
+                            <div className="w-full h-full flex flex-col justify-between items-center text-center p-8 md:p-16 relative">
+                              <div className="absolute inset-6 border-2 border-dashed border-current opacity-20 rounded-xl pointer-events-none" />
+                              <div className="mt-8">
+                                <span className="text-xs uppercase tracking-widest px-4 py-1.5 bg-black/5 rounded-full font-semibold">
+                                  PHOTOBOOK STUDIO
+                                </span>
+                              </div>
+                              <div className="max-w-2xl space-y-4 my-auto">
+                                <h1 className="text-4xl md:text-6xl font-extrabold leading-tight tracking-tight">
+                                  {albumConfig.title}
+                                </h1>
+                                <p className="text-lg md:text-2xl opacity-80 font-light">
+                                  {albumConfig.subtitle}
+                                </p>
+                              </div>
+                              <div className="mb-6 space-y-1">
+                                <p className="text-base font-semibold opacity-90">지은이: {albumConfig.author}</p>
+                                {albumConfig.date && <p className="text-xs opacity-60">{albumConfig.date}</p>}
+                              </div>
+                            </div>
+                          )}
+
+                          {currentPage > 0 && currentPage <= photos.length && (
+                            <div className="w-full h-full grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                              <div className="w-full h-full flex items-center justify-center bg-black/5 rounded-xl overflow-hidden p-4 relative group">
+                                {photos[currentPage - 1].layout === 'polaroid' ? (
+                                  <div className="bg-white text-slate-800 p-4 pb-8 shadow-xl rotate-[-1deg] max-h-full flex flex-col items-center">
+                                    <img
+                                      src={photos[currentPage - 1].url}
+                                      alt={photos[currentPage - 1].title}
+                                      className="max-h-[50vh] md:max-h-[60vh] object-contain shadow-xs"
+                                      crossOrigin="anonymous"
+                                    />
+                                    <p className="mt-4 font-serif text-sm text-slate-800 font-semibold tracking-wider">
+                                      {photos[currentPage - 1].title}
+                                    </p>
+                                  </div>
+                                ) : photos[currentPage - 1].layout === 'minimal' ? (
+                                  <div className="w-full h-full flex items-center justify-center p-2">
+                                    <img
+                                      src={photos[currentPage - 1].url}
+                                      alt={photos[currentPage - 1].title}
+                                      className="max-h-[65vh] w-full object-cover rounded-lg shadow-md"
+                                      crossOrigin="anonymous"
+                                    />
+                                  </div>
+                                ) : (
+                                  <div className="w-full h-full border-8 border-white shadow-xl bg-white flex items-center justify-center overflow-hidden rounded-md">
+                                    <img
+                                      src={photos[currentPage - 1].url}
+                                      alt={photos[currentPage - 1].title}
+                                      className="max-h-[65vh] w-full object-contain"
+                                      crossOrigin="anonymous"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="w-full h-full flex flex-col justify-center px-6 md:px-10 space-y-6">
+                                <div className="space-y-2">
+                                  <div className="flex items-center space-x-3 text-xs opacity-70 font-medium" style={{ color: tHex.subText }}>
+                                    {photos[currentPage - 1].date && <span>{photos[currentPage - 1].date}</span>}
+                                    {photos[currentPage - 1].location && <span>· {photos[currentPage - 1].location}</span>}
+                                  </div>
+                                  <h2 className="text-2xl md:text-4xl font-bold leading-snug">
+                                    {photos[currentPage - 1].title}
+                                  </h2>
+                                </div>
+
+                                <div className={`text-base md:text-lg leading-relaxed whitespace-pre-wrap opacity-90 border-l-2 pl-4 ${albumConfig.font === 'handwriting' ? 'text-xl' : ''}`} style={{ borderColor: tHex.subText }}>
+                                  {photos[currentPage - 1].description}
+                                </div>
+
+                                <div className="pt-4 flex items-center justify-between text-xs opacity-50 border-t" style={{ borderColor: tHex.pageBorder }}>
+                                  <span>Page {currentPage} of {photos.length}</span>
+                                  <span>{albumConfig.title}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {currentPage === photos.length + 1 && (
+                            <div className="w-full h-full flex flex-col justify-center items-center text-center p-12 space-y-6">
+                              <h2 className="text-3xl font-bold">The End</h2>
+                              <p className={`text-base md:text-xl opacity-85 max-w-xl leading-relaxed ${albumConfig.font === 'handwriting' ? 'text-2xl' : ''}`}>
+                                {albumConfig.closingMessage}
+                              </p>
+                              <div className="pt-8 text-xs opacity-50">
+                                {albumConfig.title} · {albumConfig.author}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Controls */}
+                      <div className="flex items-center justify-between w-full max-w-5xl mt-6 px-4">
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.max(0, prev - 1))}
+                          disabled={currentPage === 0}
+                          className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-50 disabled:opacity-30 text-slate-800 font-medium shadow-md border border-slate-200 cursor-pointer"
+                        >
+                          이전 페이지
+                        </button>
+
+                        <div className="text-sm font-semibold text-slate-700 bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-200">
+                          {currentPage === 0 ? '표지' : currentPage === totalPages - 1 ? '뒷표지' : `${currentPage} / ${photos.length}`}
+                        </div>
+
+                        <button
+                          onClick={() => setCurrentPage(prev => Math.min(totalPages - 1, prev + 1))}
+                          disabled={currentPage === totalPages - 1}
+                          className="px-5 py-2.5 rounded-xl bg-white hover:bg-slate-50 disabled:opacity-30 text-slate-800 font-medium shadow-md border border-slate-200 cursor-pointer"
+                        >
+                          다음 페이지
+                        </button>
+                      </div>
+
+                      {/* Thumbnails */}
+                      <div className="w-full max-w-5xl mt-8 flex items-center space-x-3 overflow-x-auto pb-4 pt-2 px-2">
+                        <button
+                          onClick={() => setCurrentPage(0)}
+                          className={`flex-shrink-0 w-16 h-20 rounded-lg border-2 overflow-hidden bg-slate-900 text-white flex flex-col items-center justify-center text-xs font-medium ${
+                            currentPage === 0 ? 'ring-2 ring-indigo-600 border-indigo-600 scale-105' : 'border-slate-300 opacity-70'
+                          }`}
+                        >
+                          표지
+                        </button>
+
+                        {photos.map((photo, idx) => (
+                          <button
+                            key={photo.id}
+                            onClick={() => setCurrentPage(idx + 1)}
+                            className={`flex-shrink-0 w-20 h-20 rounded-lg border-2 overflow-hidden relative ${
+                              currentPage === idx + 1 ? 'ring-2 ring-indigo-600 border-indigo-600 scale-105 shadow-md' : 'border-slate-300 opacity-75'
+                            }`}
+                          >
+                            <img src={photo.url} alt={photo.title} className="w-full h-full object-cover" />
+                            <div className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] text-center truncate px-1 py-0.5">
+                              {idx + 1}
+                            </div>
+                          </button>
+                        ))}
+
+                        <button
+                          onClick={() => setCurrentPage(totalPages - 1)}
+                          className={`flex-shrink-0 w-16 h-20 rounded-lg border-2 overflow-hidden bg-slate-900 text-white flex flex-col items-center justify-center text-xs font-medium ${
+                            currentPage === totalPages - 1 ? 'ring-2 ring-indigo-600 border-indigo-600 scale-105' : 'border-slate-300 opacity-70'
+                          }`}
+                        >
+                          뒷표지
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {activeTab === 'edit' && (
+                <div className="w-full max-w-5xl space-y-6 pb-12">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl font-bold text-slate-900">사진 관리 및 편집</h2>
+                      <p className="text-sm text-slate-500">각 사진의 제목과 설명을 편집하세요.</p>
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      <label className="cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium shadow-sm flex items-center space-x-2">
+                        <span>사진 추가하기</span>
+                        <input type="file" multiple accept="image/*" onChange={handleFileUpload} className="hidden" />
+                      </label>
+                      {photos.length > 0 && (
+                        <button onClick={clearAllPhotos} className="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2.5 rounded-xl text-sm font-medium">
+                          전체 삭제
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-6">
+                    {photos.map((photo, index) => (
+                      <div key={photo.id} className="bg-white text-slate-900 rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6 items-start">
+                        <div className="w-full md:w-64 flex-shrink-0 flex flex-col items-center space-y-3">
+                          <div className="w-full h-48 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 relative">
+                            <img src={photo.url} alt={photo.title} className="w-full h-full object-cover" />
+                            <div className="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded-md font-semibold">#{index + 1}</div>
+                          </div>
+                          <div className="flex items-center justify-between w-full px-1">
+                            <div className="flex items-center space-x-1">
+                              <button onClick={(e) => movePhoto(index, 'up', e)} disabled={index === 0} className="p-1.5 rounded-lg bg-slate-100 disabled:opacity-30">⬆</button>
+                              <button onClick={(e) => movePhoto(index, 'down', e)} disabled={index === photos.length - 1} className="p-1.5 rounded-lg bg-slate-100 disabled:opacity-30">⬇</button>
+                            </div>
+                            <button onClick={(e) => removePhoto(photo.id, e)} className="text-red-500 hover:text-red-700 text-xs font-medium">삭제</button>
+                          </div>
+                        </div>
+
+                        <div className="flex-1 w-full space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 mr-4">
+                              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">사진 제목</label>
+                              <input
+                                type="text"
+                                value={photo.title}
+                                onChange={(e) => updatePhotoDetail(photo.id, 'title', e.target.value)}
+                                className="w-full px-4 py-2 rounded-xl border border-slate-200 text-slate-800 font-semibold text-base"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">레이아웃</label>
+                              <select
+                                value={photo.layout}
+                                onChange={(e) => updatePhotoDetail(photo.id, 'layout', e.target.value)}
+                                className="px-3 py-2 rounded-xl border border-slate-200 text-slate-800 text-sm bg-white"
+                              >
+                                <option value="classic">클래식 프레임</option>
+                                <option value="polaroid">폴라로이드</option>
+                                <option value="minimal">미니멀 풀블리드</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">촬영 날짜</label>
+                              <input
+                                type="date"
+                                value={photo.date || ''}
+                                onChange={(e) => updatePhotoDetail(photo.id, 'date', e.target.value)}
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-800 text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">촬영 장소</label>
+                              <input
+                                type="text"
+                                value={photo.location || ''}
+                                onChange={(e) => updatePhotoDetail(photo.id, 'location', e.target.value)}
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-slate-800 text-sm"
+                              />
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">상세 설명</label>
+                            <textarea
+                              rows={3}
+                              value={photo.description}
+                              onChange={(e) => updatePhotoDetail(photo.id, 'description', e.target.value)}
+                              className="w-full px-4 py-2 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'settings' && (
+                <div className="w-full max-w-2xl bg-white text-slate-900 rounded-2xl p-8 shadow-sm border border-slate-200 space-y-6">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-900 mb-1">앨범 설정</h2>
+                    <p className="text-sm text-slate-500">글꼴, 표지 및 마무리 문구를 맞춤 설정하세요.</p>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">글꼴 스타일 선택</label>
+                      <div className="grid grid-cols-3 gap-3">
+                        {[
+                          { id: 'gothic', name: '고딕', fontStyle: "'Noto Sans KR', sans-serif" },
+                          { id: 'myeongjo', name: '명조', fontStyle: "'Noto Serif KR', serif" },
+                          { id: 'handwriting', name: '손글씨', fontStyle: "'Nanum Pen Script', cursive" }
+                        ].map((f) => (
+                          <button
+                            key={f.id}
+                            onClick={() => setAlbumConfig({ ...albumConfig, font: f.id })}
+                            className={`py-3 px-4 rounded-xl border-2 font-medium cursor-pointer flex flex-col items-center justify-center space-y-1 ${
+                              albumConfig.font === f.id ? 'border-indigo-600 bg-indigo-50 text-indigo-900' : 'border-slate-200 bg-white text-slate-700'
+                            }`}
+                            style={{ fontFamily: f.fontStyle }}
+                          >
+                            <span className="text-base">{f.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">앨범 제목 (표지)</label>
+                      <input
+                        type="text"
+                        value={albumConfig.title}
+                        onChange={(e) => setAlbumConfig({ ...albumConfig, title: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 font-semibold text-slate-900 text-lg"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">부제 / 소제목 (표지)</label>
+                      <input
+                        type="text"
+                        value={albumConfig.subtitle}
+                        onChange={(e) => setAlbumConfig({ ...albumConfig, subtitle: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-slate-800"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">지은이 / 저자</label>
+                        <input
+                          type="text"
+                          value={albumConfig.author}
+                          onChange={(e) => setAlbumConfig({ ...albumConfig, author: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-slate-800"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">발행 날짜</label>
+                        <input
+                          type="date"
+                          value={albumConfig.date}
+                          onChange={(e) => setAlbumConfig({ ...albumConfig, date: e.target.value })}
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-slate-800"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">마무리 문구 (마지막 쪽)</label>
+                      <textarea
+                        rows={3}
+                        value={albumConfig.closingMessage}
+                        onChange={(e) => setAlbumConfig({ ...albumConfig, closingMessage: e.target.value })}
+                        className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-slate-800 text-sm leading-relaxed"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-100 flex justify-end">
+                    <button
+                      onClick={() => setActiveTab('view')}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-xl font-medium text-sm shadow-md cursor-pointer"
+                    >
+                      저장 및 앨범으로 돌아가기
+                    </button>
+                  </div>
+                </div>
+              )}
+            </main>
+
+            {isExporting && (
+              <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="bg-white text-slate-900 rounded-2xl p-8 max-w-sm w-full text-center space-y-4 shadow-2xl">
+                  <div className="w-12 h-12 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto animate-spin">⟳</div>
+                  <h3 className="text-lg font-bold">PDF 문서 생성 중</h3>
+                  <p className="text-sm text-slate-500">{exportProgress}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+  </body>
+</html>

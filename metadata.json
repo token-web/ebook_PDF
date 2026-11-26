@@ -1,0 +1,8 @@
+{
+  "name": "사진을 이용한 전자책 제작 웹앱",
+  "description": "사진을 업로드하여 나만의 멋진 포토북을 만들고 PDF로 저장하는 앱",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
